@@ -1,33 +1,81 @@
+// +page.server.js
+
 import { kv } from '@vercel/kv';
 
 export const load = async () => {
-    const sessions = await kv.get('study-sessions');
-    return { sessions: sessions || [] };
+    const sessions = (await kv.get('study-sessions')) || [];
+    const current = (await kv.get('current-session')) || {
+        status: 'stopped',
+        elapsed: 0,
+        duration: 0
+    };
+    return { sessions, current };
 };
 
 export const actions = {
-  saveSession: async ({ request }) => {
-    const formData = await request.formData();
-    const subject = formData.get('subject');
-    const rating = formData.get('rating');
+    saveSession: async ({ request }) => {
+        const formData = await request.formData();
+        const subject = formData.get('subject');
+        const rating = formData.get('rating');
+        const duration = formData.get('duration');
 
-    // Fetch current sessions or default to empty array
-    const sessions = (await kv.get('study-sessions')) || [];
+        if (!subject || !rating || !duration) {
+            return { success: false, error: 'Missing fields' };
+        }
 
-    // Create a new session object
-    const newSession = {
-      date: new Date().toDateString(),
-      subject,
-      duration: parseInt(formData.get('duration'), 10) || 0,
-      rating: parseInt(rating, 10) || 0
-    };
+        const sessions = (await kv.get('study-sessions')) || [];
 
-    // Add new session
-    sessions.push(newSession);
+        const newSession = {
+            date: new Date().toISOString(),
+            subject: subject.toString(),
+            duration: parseInt(duration, 10) || 0,
+            rating: parseInt(rating, 10) || 0
+        };
 
-    // Save updated sessions array back to KV
-    await kv.set('study-sessions', sessions);
+        sessions.push(newSession);
 
-    return { success: true };
-  }
+        await kv.set('study-sessions', sessions);
+
+        // Reset current session in KV
+        const resetCurrent = {
+            status: 'stopped',
+            elapsed: 0,
+            duration: 0
+        };
+        await kv.set('current-session', resetCurrent);
+
+        return { success: true };
+    },
+
+    updateCurrent: async ({ request }) => {
+        const json = await request.json();
+        const { status, elapsed, duration } = json;
+        if (typeof status !== 'string' ||
+            typeof elapsed !== 'number' ||
+            typeof duration !== 'number') {
+            return { success: false, error: 'Invalid data' };
+        }
+
+        await kv.set('current-session', { status, elapsed, duration });
+
+        return { success: true };
+    },
+
+    deleteSession: async ({ request }) => {
+        const json = await request.json();
+        const { index } = json;
+        if (typeof index !== 'number') {
+            return { success: false, error: 'Invalid index' };
+        }
+
+        const sessions = (await kv.get('study-sessions')) || [];
+        if (index < 0 || index >= sessions.length) {
+            return { success: false, error: 'Index out of bounds' };
+        }
+
+        sessions.splice(index, 1);
+        await kv.set('study-sessions', sessions);
+
+        return { success: true };
+    }
 };

@@ -1,74 +1,60 @@
+<!-- +page.svelte -->
+
 <script>
 	import { onMount } from 'svelte';
+	import { invalidate } from '$app/navigation';
 
-	let status = $state('stopped'); // "stopped" | "running" | "paused" | "finished"
-	let elapsed = $state(0); // ms
-	let interval;
-	let duration = $state(0);
+	let data = $props();
 
-	// Derived time
-	let hours = $derived(Math.floor(elapsed / 1000 / 60 / 60));
-	let mins = $derived(Math.floor(elapsed / 1000 / 60) % 60);
-	let secs = $derived(Math.floor(elapsed / 1000) % 60);
+	let status = $state(data.current.status);
+	let elapsed = $state(data.current.elapsed);
+	let duration = $state(data.current.duration);
 
-	// Form state
 	let subject = $state('');
 	let rating = $state('');
 
-	// Previous sessions
-	let sessions = $state([]);
+	let sessions = $state(data.sessions || []);
+
+	let hours = $derived(() => Math.floor(elapsed / 1000 / 60 / 60));
+	let mins = $derived(() => Math.floor(elapsed / 1000 / 60) % 60);
+	let secs = $derived(() => Math.floor(elapsed / 1000) % 60);
+
+	let interval;
 
 	onMount(() => {
-		const storedSessions = localStorage.getItem('study-sessions');
-		if (storedSessions) {
-			try {
-				sessions = JSON.parse(storedSessions) || [];
-			} catch (e) {
-				console.error('Failed to parse sessions', e);
-				sessions = [];
-			}
-		}
-
-		const storedCurrent = localStorage.getItem('current-session');
-		if (storedCurrent) {
-			try {
-				const data = JSON.parse(storedCurrent);
-				status = data.status ?? 'stopped';
-				elapsed = data.elapsed ?? 0;
-				duration = data.duration ?? 0;
-
-				if (status === 'running') startTimer();
-			} catch (e) {
-				console.error('Failed to parse current session', e);
-				status = 'stopped';
-				elapsed = 0;
-				duration = 0;
-			}
+		if (status === 'running') {
+			startTimer(true);
 		}
 	});
 
-	function persistSessions() {
-		localStorage.setItem('study-sessions', JSON.stringify(sessions));
-	}
-
 	function persistCurrent() {
-		localStorage.setItem('current-session', JSON.stringify({ status, elapsed, duration }));
+		fetch('?/updateCurrent', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ status, elapsed, duration })
+		}).catch((err) => {
+			console.error('Failed to persist current session:', err);
+		});
 	}
 
-	function start() {
+	function startTimer(resume = false) {
 		if (status === 'running') return;
 		status = 'running';
-
 		const startTime = Date.now() - elapsed;
 		interval = setInterval(() => {
 			elapsed = Date.now() - startTime;
 		}, 1000);
+
+		persistCurrent();
 	}
 
 	function pause() {
 		if (status !== 'running') return;
 		clearInterval(interval);
 		status = 'paused';
+		persistCurrent();
 	}
 
 	function stop() {
@@ -76,42 +62,53 @@
 		clearInterval(interval);
 		duration = elapsed;
 		status = 'finished';
-	}
-
-	function saveSession() {
-		if (!subject || !rating) return;
-
-		sessions = [
-			...sessions,
-			{
-				date: new Date().toDateString(),
-				subject,
-				duration: Math.floor(duration / 1000 / 60),
-				rating
-			}
-		];
-
-		persistSessions();
-
-		// Reset everything
-		subject = '';
-		rating = '';
-		elapsed = 0;
-		duration = 0;
-		status = 'stopped';
 		persistCurrent();
 	}
 
-	function deleteSession(index) {
-		sessions = sessions.filter((_, i) => i !== index);
-		persistSessions();
+	async function saveSession() {
+		if (!subject || !rating) return;
+
+		const formData = new FormData();
+		formData.append('subject', subject);
+		formData.append('rating', rating);
+		formData.append('duration', String(duration));
+
+		const res = await fetch('?/saveSession', {
+			method: 'POST',
+			body: formData
+		});
+		const resJson = await res.json();
+		if (res.ok && resJson.success) {
+			await invalidate();
+			subject = '';
+			rating = '';
+			elapsed = 0;
+			duration = 0;
+			status = 'stopped';
+		} else {
+			console.error('Failed to save session:', resJson.error);
+		}
+	}
+
+	async function deleteSession(index) {
+		const res = await fetch('?/deleteSession', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ index })
+		});
+		const resJson = await res.json();
+		if (res.ok && resJson.success) {
+			await invalidate();
+		} else {
+			console.error('Delete session failed:', resJson.error);
+		}
 	}
 </script>
 
 {#if status === 'stopped'}
-	<!-- Initial state -->
+	<!-- your original initial state UI -->
 	<button
-		onclick={start}
+		onclick={startTimer}
 		class="grid h-56 place-items-center rounded-2xl bg-neutral-900 text-neutral-100"
 	>
 		<div class="flex flex-col gap-2">
@@ -132,15 +129,13 @@
 		</div>
 	</button>
 {:else if status === 'running' || status === 'paused'}
-	<!-- Timer state -->
 	<div class="grid h-[90dvh] place-items-center rounded-2xl bg-neutral-900 text-neutral-100">
 		<div class="flex flex-col gap-8">
 			<p class="text-center text-6xl font-bold">
 				{mins.toString().padStart(2, '0')}:{secs.toString().padStart(2, '0')}
 			</p>
-
 			<div class="flex justify-center gap-4">
-				<button class="flex items-center gap-2" aria-label="stop" title="stop" onclick={stop}>
+				<button class="flex items-center gap-2" title="stop" onclick={stop}>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
 						viewBox="0 0 16 16"
@@ -152,12 +147,7 @@
 					Stop and save
 				</button>
 				{#if status === 'paused'}
-					<button
-						class="flex items-center gap-2"
-						aria-label="continue"
-						title="continue"
-						onclick={start}
-					>
+					<button class="flex items-center gap-2" title="continue" onclick={startTimer}>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
 							viewBox="0 0 16 16"
@@ -171,8 +161,8 @@
 						Continue
 					</button>
 				{:else}
-					<button class="flex items-center gap-2" aria-label="pause" title="pause" onclick={pause}
-						><svg
+					<button class="flex items-center gap-2" title="pause" onclick={pause}>
+						<svg
 							xmlns="http://www.w3.org/2000/svg"
 							viewBox="0 0 16 16"
 							fill="currentColor"
@@ -187,10 +177,13 @@
 				{/if}
 			</div>
 		</div>
-	</div>{:else if status === 'finished'}
-	<!-- Session summary form -->
+	</div>
+{:else if status === 'finished'}
 	<form
-		method="POST"
+		onsubmit={(e) => {
+			e.preventDefault();
+			saveSession()
+		}}
 		class="grid h-[90dvh] place-items-center rounded-2xl bg-neutral-900 p-6 text-neutral-100"
 	>
 		<div class="flex flex-col gap-12">
@@ -249,8 +242,6 @@
 {/if}
 
 <div>
-	<!-- Previous sessions -->
-	<!-- Table headers (add a new "Actions" column) -->
 	<div class="grid grid-cols-7 border-b border-neutral-200">
 		<p class="col-span-2 px-4 py-2">Date</p>
 		<p class="col-span-2 px-4 py-2">Subject</p>
@@ -259,7 +250,6 @@
 		<p class="px-4 py-2 text-center">{' '}</p>
 	</div>
 
-	<!-- Session rows -->
 	{#each sessions as s, i}
 		<div
 			class="grid grid-cols-7 items-center divide-x divide-neutral-200 border-b border-neutral-200"
@@ -271,9 +261,9 @@
 			<div class="px-4 py-2 text-center">
 				<button
 					aria-label="delete"
-					onclick={() => deleteSession(i)}
 					class="cursor-pointer text-red-500 hover:underline"
 					title="Delete session"
+					onclick={() => deleteSession(i)}
 				>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
@@ -286,8 +276,8 @@
 							d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5a.75.75 0 0 1 .786-.711Z"
 							clip-rule="evenodd"
 						/>
-					</svg>
-				</button>
+					</svg></button
+				>
 			</div>
 		</div>
 	{/each}
