@@ -1,6 +1,4 @@
-// +page.server.js
-
-import { kv } from '@vercel/kv';
+import { kv } from '$lib/kv';
 
 export const load = async () => {
     const sessions = (await kv.get('study-sessions')) || [];
@@ -50,9 +48,11 @@ export const actions = {
     updateCurrent: async ({ request }) => {
         const json = await request.json();
         const { status, elapsed, duration } = json;
-        if (typeof status !== 'string' ||
+        if (
+            typeof status !== 'string' ||
             typeof elapsed !== 'number' ||
-            typeof duration !== 'number') {
+            typeof duration !== 'number'
+        ) {
             return { success: false, error: 'Invalid data' };
         }
 
