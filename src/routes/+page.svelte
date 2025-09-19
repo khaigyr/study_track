@@ -187,10 +187,12 @@
 				{/if}
 			</div>
 		</div>
-	</div>
-{:else if status === 'finished'}
+	</div>{:else if status === 'finished'}
 	<!-- Session summary form -->
-	<div class="grid h-[90dvh] place-items-center rounded-2xl bg-neutral-900 p-6 text-neutral-100">
+	<form
+		method="POST"
+		class="grid h-[90dvh] place-items-center rounded-2xl bg-neutral-900 p-6 text-neutral-100"
+	>
 		<div class="flex flex-col gap-12">
 			<div class="flex flex-col gap-2 text-center">
 				<p class="text-neutral-400">You studied for</p>
@@ -202,10 +204,11 @@
 						What <span class="text-neutral-100">subject</span> were you studying?
 					</p>
 					<input
-						bind:value={subject}
+						name="subject"
 						required
 						class="rounded-md bg-neutral-800 px-4 py-2"
 						type="text"
+						bind:value={subject}
 					/>
 				</label>
 				<label class="flex flex-col gap-2">
@@ -213,20 +216,22 @@
 						Out of 20, how would you <span class="text-neutral-100">rate your productivity</span>?
 					</p>
 					<input
-						bind:value={rating}
+						name="rating"
 						required
 						min="1"
 						max="20"
 						class="rounded-md bg-neutral-800 px-4 py-2"
 						type="number"
+						bind:value={rating}
 					/>
 				</label>
 			</div>
 			<button
-				onclick={saveSession}
+				type="submit"
 				class="flex items-center justify-center gap-2 rounded-md bg-neutral-100 px-4 py-2 font-bold text-neutral-800"
 			>
-				Save study session <svg
+				Save study session
+				<svg
 					xmlns="http://www.w3.org/2000/svg"
 					viewBox="0 0 16 16"
 					fill="currentColor"
@@ -240,8 +245,9 @@
 				</svg>
 			</button>
 		</div>
-	</div>
+	</form>
 {/if}
+
 <div>
 	<!-- Previous sessions -->
 	<!-- Table headers (add a new "Actions" column) -->
